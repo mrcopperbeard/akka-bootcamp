@@ -1,48 +1,26 @@
 ﻿using System;
+
 ﻿using Akka.Actor;
 
 namespace WinTail
 {
-    #region Program
-    class Program
-    {
-        public static ActorSystem MyActorSystem;
+	internal class Program
+	{
+		private static void Main(string[] _)
+		{
+			var myActorSystem = ActorSystem.Create("my-actor-system");
 
-        static void Main(string[] args)
-        {
-            // initialize MyActorSystem
-            // YOU NEED TO FILL IN HERE
+			var writerProps = Props.Create<ConsoleWriterActor>();
+			var writer = myActorSystem.ActorOf(writerProps, "writer");
 
-            PrintInstructions();
+			var validatorProps = Props.Create(() => new ValidationActor(writer));
+			var validator = myActorSystem.ActorOf(validatorProps, "validator");
 
-            // time to make your first actors!
-            //YOU NEED TO FILL IN HERE
-            // make consoleWriterActor using these props: Props.Create(() => new ConsoleWriterActor())
-            // make consoleReaderActor using these props: Props.Create(() => new ConsoleReaderActor(consoleWriterActor))
+			var readerProps = Props.Create(() => new ConsoleReaderActor(validator));
+			var reader = myActorSystem.ActorOf(readerProps, "reader");
 
-
-            // tell console reader to begin
-            //YOU NEED TO FILL IN HERE
-
-            // blocks the main thread from exiting until the actor system is shut down
-            MyActorSystem.WhenTerminated.Wait();
-        }
-
-        private static void PrintInstructions()
-        {
-            Console.WriteLine("Write whatever you want into the console!");
-            Console.Write("Some lines will appear as");
-            Console.ForegroundColor = ConsoleColor.DarkRed;
-            Console.Write(" red ");
-            Console.ResetColor();
-            Console.Write(" and others will appear as");
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.Write(" green! ");
-            Console.ResetColor();
-            Console.WriteLine();
-            Console.WriteLine();
-            Console.WriteLine("Type 'exit' to quit this application at any time.\n");
-        }
-    }
-    #endregion
+			reader.Tell(Messages.Start.Value);
+			myActorSystem.WhenTerminated.Wait();
+		}
+	}
 }
