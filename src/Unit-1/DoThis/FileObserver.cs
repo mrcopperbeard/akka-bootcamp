@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+
 using Akka.Actor;
 
 namespace WinTail
@@ -23,7 +24,7 @@ namespace WinTail
 			var fileDir = Path.GetDirectoryName(_absoluteFilePath)
 				?? throw new ArgumentException($"{_absoluteFilePath} has no directory", nameof(_absoluteFilePath));
 
-			var fileName = Path.GetDirectoryName(_absoluteFilePath)
+			var fileName = Path.GetFileName(_absoluteFilePath)
 				?? throw new ArgumentException($"{_absoluteFilePath} has no directory", nameof(_absoluteFilePath));
 
 			_watcher = new FileSystemWatcher(fileDir, fileName)
@@ -31,7 +32,7 @@ namespace WinTail
 				NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite
 			};
 
-			_watcher.Changed += (sender, args) =>
+			_watcher.Changed += (_, args) =>
 			{
 				if (args.ChangeType == WatcherChangeTypes.Changed)
 				{
@@ -39,10 +40,12 @@ namespace WinTail
 				}
 			};
 
-			_watcher.Error += (sender, args) =>
+			_watcher.Error += (_, args) =>
 			{
 				_tailActor.Tell(new TailActor.FileError(fileName, args.GetException().Message), ActorRefs.NoSender);
 			};
+
+			_watcher.EnableRaisingEvents = true;
 		}
 
 		/// <inheritdoc />

@@ -39,10 +39,6 @@
 
 		public class ErrorInput
 		{
-			public static ErrorInput NullInput = new ErrorInput("Input is null or empty");
-
-			public static ErrorInput InvalidInput = new ErrorInput("Input is invalid");
-
 			public ErrorInput(string reason)
 			{
 				Reason = reason;

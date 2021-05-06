@@ -1,4 +1,5 @@
-﻿using Akka.Actor;
+﻿using System;
+using Akka.Actor;
 
 namespace WinTail
 {
@@ -10,11 +11,23 @@ namespace WinTail
 			switch (message)
 			{
 				case StartTail start:
+					var tailProps = Props.Create(() => new TailActor(start.FilePath, start.ReporterActor));
+					Context.ActorOf(tailProps); // Sends message to itself in ctor...
 					break;
-				case EndTail end:
+				case EndTail _:
 					break;
 			}
 		}
+
+		protected override SupervisorStrategy SupervisorStrategy()
+			=> new OneForOneStrategy(
+				10,
+				2000,
+				err => err switch
+				{
+					NotSupportedException => Directive.Stop,
+					_ => Directive.Restart,
+				});
 
 		public class StartTail
 		{

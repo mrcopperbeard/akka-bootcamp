@@ -4,24 +4,24 @@ using Akka.Actor;
 
 namespace WinTail
 {
-	/// <summary>
-	///     Actor responsible for serializing message writes to the console.
-	///     (write one message at a time, champ :)
-	/// </summary>
 	internal class ConsoleWriterActor : UntypedActor
 	{
 		protected override void OnReceive(object message)
 		{
 			switch (message)
 			{
+				case string str:
+					Console.WriteLine(str);
+					break;
+
 				case Messages.SuccessInput successInput:
 					Console.ForegroundColor = ConsoleColor.Green;
-					Console.WriteLine($"{Self.Path}: Correct! {successInput.Reason}");
+					Console.WriteLine($"{Context.Sender.Path}: {successInput.Reason}");
 					break;
 
 				case Messages.ErrorInput error:
 					Console.ForegroundColor = ConsoleColor.Red;
-					Console.WriteLine($"{Self.Path}: Error: {error.Reason}");
+					Console.WriteLine($"{Context.Sender.Path}: Error: {error.Reason}");
 					break;
 			}
 			

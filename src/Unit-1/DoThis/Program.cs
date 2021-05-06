@@ -1,6 +1,4 @@
-﻿using System;
-
-﻿using Akka.Actor;
+﻿﻿using Akka.Actor;
 
 namespace WinTail
 {
@@ -13,7 +11,9 @@ namespace WinTail
 			var writerProps = Props.Create<ConsoleWriterActor>();
 			var writer = myActorSystem.ActorOf(writerProps, "writer");
 
-			var validatorProps = Props.Create(() => new ValidationActor(writer));
+			var tailCoordinator = myActorSystem.ActorOf(Props.Create<TailCoordinatorActor>(), "tailCoordinator");
+
+			var validatorProps = Props.Create(() => new FileValidationActor(writer, tailCoordinator));
 			var validator = myActorSystem.ActorOf(validatorProps, "validator");
 
 			var readerProps = Props.Create(() => new ConsoleReaderActor(validator));
