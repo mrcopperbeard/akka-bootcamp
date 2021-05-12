@@ -10,22 +10,27 @@ namespace WinTail
 
 		private readonly IActorRef _reporter;
 
-		private readonly FileObserver _observer;
+		private FileObserver _observer;
 
-		private readonly Stream _fileStream;
+		private Stream _fileStream;
 
-		private readonly StreamReader _fileStreamReader;
+		private StreamReader _fileStreamReader;
 
 		public TailActor(string filePath, IActorRef reporter)
 		{
-			var fullPath = Path.GetFullPath(filePath);
-
 			_filePath = filePath;
 			_reporter = reporter;
+		}
+
+		/// <inheritdoc />
+		protected override void PreStart()
+		{
+			var fullPath = Path.GetFullPath(_filePath);
+
 			_observer = new FileObserver(Self, fullPath);
 			_observer.Start();
 
-			reporter.Tell("Observer started");
+			_reporter.Tell("Observer started");
 
 			_fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 			_fileStreamReader = new StreamReader(_fileStream, Encoding.UTF8);
@@ -56,6 +61,14 @@ namespace WinTail
 					_reporter.Tell($"Tail error: {fileError.Reason}");
 					break;
 			}
+		}
+
+		/// <inheritdoc />
+		protected override void PostStop()
+		{
+			_fileStreamReader?.Dispose();
+			_fileStream?.Dispose();
+			_observer?.Dispose();
 		}
 
 		public class FileWrite

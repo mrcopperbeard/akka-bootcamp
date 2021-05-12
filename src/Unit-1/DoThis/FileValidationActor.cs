@@ -8,27 +8,31 @@ namespace WinTail
 	public class FileValidationActor : UntypedActor
 	{
 		private readonly IActorRef _writer;
-		private readonly IActorRef _tailCoordinator;
 
-		public FileValidationActor(IActorRef writer, IActorRef tailCoordinator)
+		public FileValidationActor(IActorRef writer)
 		{
 			_writer = writer;
-			_tailCoordinator = tailCoordinator;
 		}
 
 		/// <inheritdoc />
 		protected override void OnReceive(object message)
 		{
-			var error = OnReceiveInternal(message);
+			var (path, error) = OnReceiveInternal(message);
 
 			if (error != null)
 			{
 				_writer.Tell(error);
 				Sender.Tell(Messages.Continue.Value);
 			}
+			else
+			{
+				var startTail = new TailCoordinatorActor.StartTail(path, _writer);
+
+				Context.ActorSelection("akka://my-actor-system/user/tailCoordinator").Tell(startTail);
+			}
 		}
 
-		private Messages.ErrorInput OnReceiveInternal(object message)
+		private (string path, Messages.ErrorInput error) OnReceiveInternal(object message)
 		{
 			if (message is Messages.ValidateRequest validationRequest)
 			{
@@ -36,21 +40,20 @@ namespace WinTail
 
 				if (string.IsNullOrEmpty(path))
 				{
-					return new Messages.ErrorInput("Path is null");
+					return (null, new Messages.ErrorInput("Path is null"));
 				}
 
 				if (!File.Exists(path))
 				{
-					return new Messages.ErrorInput($"Path {path} does not exists");
+					return (null, new Messages.ErrorInput($"Path {path} does not exists"));
 				}
 
 				_writer.Tell(new Messages.SuccessInput($"Starting processing {path}"));
-				_tailCoordinator.Tell(new TailCoordinatorActor.StartTail(path, _writer));
 
-				return null;
+				return (path, null);
 			}
 
-			return new Messages.ErrorInput($"{Self.Path}: Unknown message type {message.GetType()}");
+			return (null, new Messages.ErrorInput($"{Self.Path}: Unknown message type {message.GetType()}"));
 		}
 	}
 }
