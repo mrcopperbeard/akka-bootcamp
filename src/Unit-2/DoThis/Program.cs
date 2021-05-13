@@ -20,7 +20,7 @@ namespace ChartApp
         static void Main()
         {
             ChartActors = ActorSystem.Create("ChartActors");
-            Application.SetHighDpiMode(HighDpiMode.SystemAware);
+            // Application.SetHighDpiMode(HighDpiMode.SystemAware);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Main());

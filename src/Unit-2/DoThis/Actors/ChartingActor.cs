@@ -2,73 +2,92 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms.DataVisualization.Charting;
+
 using Akka.Actor;
 
 namespace ChartApp.Actors
 {
-    public class ChartingActor : UntypedActor
-    {
-        #region Messages
+	public class ChartingActor : ReceiveActor
+	{
+		#region Messages
 
-        public class InitializeChart
-        {
-            public InitializeChart(Dictionary<string, Series> initialSeries)
-            {
-                InitialSeries = initialSeries;
-            }
+		public class AddSeries
+		{
+			public AddSeries(Series series)
+			{
+				Series = series;
+			}
 
-            public Dictionary<string, Series> InitialSeries { get; private set; }
-        }
+			public Series Series { get; }
+		}
 
-        #endregion
+		public class InitializeChart
+		{
+			public InitializeChart(Dictionary<string, Series> initialSeries)
+			{
+				InitialSeries = initialSeries;
+			}
 
-        private readonly Chart _chart;
-        private Dictionary<string, Series> _seriesIndex;
+			public Dictionary<string, Series> InitialSeries { get; }
+		}
 
-        public ChartingActor(Chart chart) : this(chart, new Dictionary<string, Series>())
-        {
-        }
+		#endregion
 
-        public ChartingActor(Chart chart, Dictionary<string, Series> seriesIndex)
-        {
-            _chart = chart;
-            _seriesIndex = seriesIndex;
-        }
+		private readonly Chart _chart;
+		private Dictionary<string, Series> _seriesIndex;
 
-        protected override void OnReceive(object message)
-        {
-            if (message is InitializeChart)
-            {
-                var ic = message as InitializeChart;
-                HandleInitialize(ic);
-            }
-        }
+		private ChartingActor()
+		{
+			Receive<InitializeChart>(HandleInitialize);
 
-        #region Individual Message Type Handlers
+			Receive<AddSeries>(message =>
+			{
+				var series = message.Series;
+				var name = series.Name;
 
-        private void HandleInitialize(InitializeChart ic)
-        {
-            if (ic.InitialSeries != null)
-            {
-                //swap the two series out
-                _seriesIndex = ic.InitialSeries;
-            }
+				if (string.IsNullOrEmpty(name) || _seriesIndex.ContainsKey(name))
+				{
+					return;
+				}
 
-            //delete any existing series
-            _chart.Series.Clear();
+				_seriesIndex[name] = series;
+				_chart.Series.Add(series);
+			});
+		}
 
-            //attempt to render the initial chart
-            if (_seriesIndex.Any())
-            {
-                foreach (var series in _seriesIndex)
-                {
-                    //force both the chart and the internal index to use the same names
-                    series.Value.Name = series.Key;
-                    _chart.Series.Add(series.Value);
-                }
-            }
-        }
+		public ChartingActor(Chart chart)
+			: this(chart, new Dictionary<string, Series>())
+		{
+		}
 
-        #endregion
-    }
+		public ChartingActor(Chart chart, Dictionary<string, Series> seriesIndex)
+			: this()
+		{
+			_chart = chart;
+			_seriesIndex = seriesIndex;
+		}
+
+		#region Individual Message Type Handlers
+
+		private void HandleInitialize(InitializeChart ic)
+		{
+			if (ic.InitialSeries != null)
+				//swap the two series out
+				_seriesIndex = ic.InitialSeries;
+
+			//delete any existing series
+			_chart.Series.Clear();
+
+			//attempt to render the initial chart
+			if (_seriesIndex.Any())
+				foreach (var series in _seriesIndex)
+				{
+					//force both the chart and the internal index to use the same names
+					series.Value.Name = series.Key;
+					_chart.Series.Add(series.Value);
+				}
+		}
+
+		#endregion
+	}
 }
