@@ -1,17 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using System.Windows.Forms.DataVisualization.Charting;
+
 using Akka.Actor;
-using Akka.Util.Internal;
 using ChartApp.Actors;
+using ChartApp.Messages;
 
 namespace ChartApp
 {
 	public partial class Main : Form
 	{
+		private IActorRef _coordinatorActor;
 		private IActorRef _chartActor;
-		private readonly AtomicCounter _seriesCounter = new AtomicCounter(1);
+		private readonly Dictionary<CounterType, IActorRef> _buttonToggleActors = new();
 
 		public Main()
 		{
@@ -21,11 +22,15 @@ namespace ChartApp
 		private void Main_Load(object sender, EventArgs e)
 		{
 			_chartActor = Program.ChartActors.ActorOf(Props.Create(() => new ChartingActor(sysChart)), "charting");
-			var series = ChartDataHelper.RandomSeries("FakeSeries" + _seriesCounter.GetAndIncrement());
-			_chartActor.Tell(new ChartingActor.InitializeChart(new Dictionary<string, Series>
-			{
-				{series.Name, series}
-			}));
+			_chartActor.Tell(new ChartingActor.InitializeChart(null));
+
+			var coordinatorProps = Props.Create(() => new PerformanceCounterCoordinatorActor(_chartActor));
+
+			_coordinatorActor = Program.ChartActors.ActorOf(coordinatorProps, "counter-coordinator");
+
+			_buttonToggleActors[CounterType.Cpu] = CreateBtnActor(CounterType.Cpu, cpuBtn);
+			_buttonToggleActors[CounterType.Memory] = CreateBtnActor(CounterType.Memory, memoryBtn);
+			_buttonToggleActors[CounterType.Disk] = CreateBtnActor(CounterType.Disk, discBtn);
 		}
 
 		private void Main_FormClosing(object sender, FormClosingEventArgs e)
@@ -37,12 +42,24 @@ namespace ChartApp
 			Program.ChartActors.Terminate();
 		}
 
-		private void button1_Click(object sender, EventArgs e)
-		{
-			var seriesName = $"FakeSeries{_seriesCounter.GetAndIncrement()}";
-			var series = ChartDataHelper.RandomSeries(seriesName);
+		private IActorRef CreateBtnActor(CounterType counterType, Control button)
+			=> Program.ChartActors.ActorOf(Props
+				.Create(() => new ButtonToggleActor(counterType, _coordinatorActor, button))
+				.WithDispatcher("akka.actor.synchronized-dispatcher"));
 
-			_chartActor.Tell(new ChartingActor.AddSeries(series));
+		private void cpuBtn_Click(object sender, EventArgs e)
+		{
+			_buttonToggleActors[CounterType.Cpu].Tell(new ButtonToggleActor.Toggle());
+		}
+
+		private void memoryBtn_Click(object sender, EventArgs e)
+		{
+			_buttonToggleActors[CounterType.Memory].Tell(new ButtonToggleActor.Toggle());
+		}
+
+		private void discBtn_Click(object sender, EventArgs e)
+		{
+			_buttonToggleActors[CounterType.Disk].Tell(new ButtonToggleActor.Toggle());
 		}
 	}
 }
