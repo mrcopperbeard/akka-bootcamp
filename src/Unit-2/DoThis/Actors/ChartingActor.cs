@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 
 using Akka.Actor;
@@ -8,7 +9,7 @@ using ChartApp.Messages;
 
 namespace ChartApp.Actors
 {
-	public class ChartingActor : ReceiveActor
+	public class ChartingActor : ReceiveActor, IWithUnboundedStash
 	{
 		#region Messages
 
@@ -42,6 +43,10 @@ namespace ChartApp.Actors
 			public Dictionary<string, Series> InitialSeries { get; }
 		}
 
+		public class TogglePause
+		{
+		}
+
 		#endregion
 
 		/// <summary>
@@ -52,12 +57,46 @@ namespace ChartApp.Actors
 		/// <summary>
 		/// Incrementing counter we use to plot along the X-axis
 		/// </summary>
-		private int XPosCounter;
+		private int _xPosCounter;
 
 		private readonly Chart _chart;
+
+		private readonly Control _pauseButton;
+
 		private Dictionary<string, Series> _seriesIndex;
 
-		private ChartingActor()
+		public ChartingActor(Chart chart, Control pauseButton)
+		{
+			_chart = chart;
+			_pauseButton = pauseButton;
+			_seriesIndex = new Dictionary<string, Series>();
+
+			Charting();
+		}
+
+		public IStash Stash { get; set; }
+
+		private void SetChartBoundaries()
+		{
+			double maxAxisX = _xPosCounter;
+			double minAxisX = _xPosCounter - MaxPoints;
+
+			var allPoints = _seriesIndex.Values.SelectMany(series => series.Points).ToList();
+			var yValues = allPoints.SelectMany(point => point.YValues).ToList();
+			var maxAxisY = yValues.Count > 0 ? Math.Ceiling(yValues.Max()) : 1.0d;
+			var minAxisY = yValues.Count > 0 ? Math.Floor(yValues.Min()) : 0.0d;
+
+			if (allPoints.Count > 2)
+			{
+				var area = _chart.ChartAreas[0];
+				area.AxisX.Minimum = minAxisX;
+				area.AxisX.Maximum = maxAxisX;
+				area.AxisY.Minimum = minAxisY;
+				area.AxisY.Maximum = maxAxisY;
+			}
+		}
+
+		private void Charting()
 		{
 			Receive<InitializeChart>(HandleInitialize);
 
@@ -92,48 +131,35 @@ namespace ChartApp.Actors
 
 			Receive<Metric>(metric =>
 			{
-				var series = _seriesIndex[metric.Series];
-				series.Points.AddXY(XPosCounter++, metric.CounterValue);
-				while (series.Points.Count > MaxPoints) series.Points.RemoveAt(0);
-
+				SetMetric(metric.Series, metric.CounterValue);
 				SetChartBoundaries();
+			});
+
+			Receive<TogglePause>(_ =>
+			{
+				BecomeStacked(Paused);
+				SetPauseButtonText(false);
 			});
 		}
 
-		public ChartingActor(Chart chart)
-			: this(chart, new Dictionary<string, Series>())
+		private void Paused()
 		{
-		}
+			Receive<AddSeries>(_ => Stash.Stash());
+			Receive<RemoveSeries>(_ => Stash.Stash());
 
-		private void SetChartBoundaries()
-		{
-			double maxAxisX = XPosCounter;
-			double minAxisX = XPosCounter - MaxPoints;
-
-			var allPoints = _seriesIndex.Values.SelectMany(series => series.Points).ToList();
-			var yValues = allPoints.SelectMany(point => point.YValues).ToList();
-			var maxAxisY = yValues.Count > 0 ? Math.Ceiling(yValues.Max()) : 1.0d;
-			var minAxisY = yValues.Count > 0 ? Math.Floor(yValues.Min()) : 0.0d;
-
-			if (allPoints.Count > 2)
+			Receive<TogglePause>(_ =>
 			{
-				var area = _chart.ChartAreas[0];
-				area.AxisX.Minimum = minAxisX;
-				area.AxisX.Maximum = maxAxisX;
-				area.AxisY.Minimum = minAxisY;
-				area.AxisY.Maximum = maxAxisY;
-			}
+				UnbecomeStacked();
+				Stash.UnstashAll();
+				SetPauseButtonText(true);
+			});
+
+			Receive<Metric>(metric =>
+			{
+				SetMetric(metric.Series, 0f);
+				SetChartBoundaries();
+			});
 		}
-
-
-		public ChartingActor(Chart chart, Dictionary<string, Series> seriesIndex)
-			: this()
-		{
-			_chart = chart;
-			_seriesIndex = seriesIndex;
-		}
-
-		#region Individual Message Type Handlers
 
 		private void HandleInitialize(InitializeChart ic)
 		{
@@ -164,6 +190,18 @@ namespace ChartApp.Actors
 			}
 		}
 
-		#endregion
+		private void SetMetric(string seriesName, float seriesValue)
+		{
+			if (_seriesIndex.TryGetValue(seriesName, out var series))
+			{
+				series.Points.AddXY(_xPosCounter++, seriesValue);
+				while (series.Points.Count > MaxPoints) series.Points.RemoveAt(0);
+			}
+		}
+
+		private void SetPauseButtonText(bool resumePressed)
+		{
+			_pauseButton.Text = resumePressed ? "PAUSE ||" : "RESUME ->";
+		}
 	}
 }

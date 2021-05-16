@@ -21,7 +21,10 @@ namespace ChartApp
 
 		private void Main_Load(object sender, EventArgs e)
 		{
-			_chartActor = Program.ChartActors.ActorOf(Props.Create(() => new ChartingActor(sysChart)), "charting");
+			var chartActorProps = Props.Create(() => new ChartingActor(sysChart, pauseResumeBtn))
+				.WithDispatcher("akka.actor.synchronized-dispatcher");
+
+			_chartActor = Program.ChartActors.ActorOf(chartActorProps,"chart");
 			_chartActor.Tell(new ChartingActor.InitializeChart(null));
 
 			var coordinatorProps = Props.Create(() => new PerformanceCounterCoordinatorActor(_chartActor));
@@ -60,6 +63,11 @@ namespace ChartApp
 		private void discBtn_Click(object sender, EventArgs e)
 		{
 			_buttonToggleActors[CounterType.Disk].Tell(new ButtonToggleActor.Toggle());
+		}
+
+		private void pauseResumeBtn_Click(object sender, EventArgs e)
+		{
+			_chartActor.Tell(new ChartingActor.TogglePause());
 		}
 	}
 }
