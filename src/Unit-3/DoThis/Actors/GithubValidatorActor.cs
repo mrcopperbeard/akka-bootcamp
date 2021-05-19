@@ -52,8 +52,7 @@ namespace GithubActors.Actors
              * and it's used internally inside Akka.NET for similar scenarios.
              */
             private RepoIsValid() { }
-            private static readonly RepoIsValid _instance = new RepoIsValid();
-            public static RepoIsValid Instance { get { return _instance; } }
+            public static RepoIsValid Instance { get; } = new RepoIsValid();
         }
 
         #endregion

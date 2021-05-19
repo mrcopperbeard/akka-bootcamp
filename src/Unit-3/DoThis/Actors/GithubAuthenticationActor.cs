@@ -68,7 +68,7 @@ namespace GithubActors.Actors
         private void BecomeUnauthenticated(string reason)
         {
             _statusLabel.ForeColor = Color.Red;
-            _statusLabel.Text = "Authentication failed. Please try again.";
+            _statusLabel.Text = reason;
             Become(Unauthenticated);
         }
 
