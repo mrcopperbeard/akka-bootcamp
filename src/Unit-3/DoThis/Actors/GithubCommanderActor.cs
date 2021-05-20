@@ -56,15 +56,9 @@ namespace GithubActors.Actors
 
 		protected override void PreStart()
 		{
-			const int groupCount = 3;
 			var coordinatorProps = Props.Create(() => new GithubCoordinatorActor());
 
-			RepeatName(ActorPaths.GithubCoordinatorActor.Name, groupCount)
-				.ForEach(name => Context.ActorOf(coordinatorProps, name));
-
-			var group = new BroadcastGroup(RepeatName(ActorPaths.GithubCoordinatorActor.Path, groupCount));
-
-			_coordinator = Context.ActorOf(Props.Empty.WithRouter(group));
+			_coordinator = Context.ActorOf(coordinatorProps.WithRouter(FromConfig.Instance), ActorPaths.GithubCoordinatorActor.Name);
 
 			base.PreStart();
 		}
@@ -75,11 +69,6 @@ namespace GithubActors.Actors
 			_coordinator.Tell(PoisonPill.Instance);
 			base.PreRestart(reason, message);
 		}
-
-		private static IEnumerable<string> RepeatName(string name, int count) =>
-			Enumerable
-				.Range(1, count)
-				.Select(i => string.Join('-', name, i.ToString()));
 
 		private void Ready()
 		{
@@ -129,7 +118,7 @@ namespace GithubActors.Actors
 		private void BecomeAsking()
 		{
 			_canAcceptJobSender = Sender;
-			_pendingJobReplies = 3;
+			_pendingJobReplies = _coordinator.Ask<Routees>(new GetRoutees()).Result.Members.Count();
 
 			Become(Asking);
 		}
