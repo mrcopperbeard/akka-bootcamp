@@ -1,113 +1,99 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Akka.Actor;
 using Octokit;
 
 namespace GithubActors.Actors
 {
-    /// <summary>
-    /// Individual actor responsible for querying the Github API
-    /// </summary>
-    public class GithubWorkerActor : ReceiveActor
-    {
-        #region Message classes
+	/// <summary>
+	///     Individual actor responsible for querying the Github API
+	/// </summary>
+	public class GithubWorkerActor : ReceiveActor
+	{
+		#region Message classes
 
-        public class QueryStarrers
-        {
-            public QueryStarrers(RepoKey key)
-            {
-                Key = key;
-            }
+		public class QueryStarrers
+		{
+			public QueryStarrers(RepoKey key)
+			{
+				Key = key;
+			}
 
-            public RepoKey Key { get; private set; }
-        }
+			public RepoKey Key { get; }
+		}
 
-        /// <summary>
-        /// Query an individual starrer
-        /// </summary>
-        public class QueryStarrer
-        {
-            public QueryStarrer(string login)
-            {
-                Login = login;
-            }
+		/// <summary>
+		///     Query an individual starrer
+		/// </summary>
+		public class QueryStarrer
+		{
+			public QueryStarrer(string login)
+			{
+				Login = login;
+			}
 
-            public string Login { get; private set; }
-        }
+			public string Login { get; }
+		}
 
-        public class StarredReposForUser
-        {
-            public StarredReposForUser(string login, IEnumerable<Repository> repos)
-            {
-                Repos = repos;
-                Login = login;
-            }
+		public class StarredReposForUser
+		{
+			public StarredReposForUser(string login, IEnumerable<Repository> repos)
+			{
+				Repos = repos;
+				Login = login;
+			}
 
-            public string Login { get; private set; }
+			public string Login { get; }
 
-            public IEnumerable<Repository> Repos { get; private set; }
-        }
+			public IEnumerable<Repository> Repos { get; }
+		}
 
-        #endregion
+		#endregion
 
-        private IGitHubClient _gitHubClient;
-        private readonly Func<IGitHubClient> _gitHubClientFactory;
+		private IGitHubClient _gitHubClient;
+		private readonly Func<IGitHubClient> _gitHubClientFactory;
 
-        public GithubWorkerActor(Func<IGitHubClient> gitHubClientFactory)
-        {
-            _gitHubClientFactory = gitHubClientFactory;
-            InitialReceives();
-        }
+		public GithubWorkerActor(Func<IGitHubClient> gitHubClientFactory)
+		{
+			_gitHubClientFactory = gitHubClientFactory;
+			InitialReceives();
+		}
 
-        protected override void PreStart()
-        {
-            _gitHubClient = _gitHubClientFactory();
-        }
+		protected override void PreStart()
+		{
+			_gitHubClient = _gitHubClientFactory();
+		}
 
-        private void InitialReceives()
-        {
-            //query an individual starrer
-            Receive<RetryableQuery>(query => query.Query is QueryStarrer, query =>
-            {
-                // ReSharper disable once PossibleNullReferenceException (we know from the previous IS statement that this is not null)
-                var starrer = (query.Query as QueryStarrer).Login;
-                try
-                {
-                    var getStarrer = _gitHubClient.Activity.Starring.GetAllForUser(starrer);
+		private void InitialReceives()
+		{
+			//query an individual starrer
+			Receive<RetryableQuery>(query => query.Query is QueryStarrer, query =>
+			{
+				// ReSharper disable once PossibleNullReferenceException (we know from the previous IS statement that this is not null)
+				var starGiver = (query.Query as QueryStarrer).Login;
+				var sender = Sender;
 
-                    //ewww
-                    getStarrer.Wait();
-                    var starredRepos = getStarrer.Result;
-                    Sender.Tell(new StarredReposForUser(starrer, starredRepos));
-                }
-                catch (Exception)
-                {
-                    //operation failed - let the parent know
-                    Sender.Tell(query.NextTry());
-                }
-            });
+				_gitHubClient.Activity.Starring.GetAllForUser(starGiver)
+					.ContinueWith<object>((Task<IReadOnlyList<Repository>> task) => task.IsCanceled || task.IsFaulted
+						? query.NextTry()
+						: new StarredReposForUser(starGiver, task.Result))
+					.PipeTo(sender);
+			});
 
-            //query all starrers for a repository
-            Receive<RetryableQuery>(query => query.Query is QueryStarrers, query =>
-            {
-                // ReSharper disable once PossibleNullReferenceException (we know from the previous IS statement that this is not null)
-                var starrers = (query.Query as QueryStarrers).Key;
-                try
-                {
-                    var getStars = _gitHubClient.Activity.Starring.GetAllStargazers(starrers.Owner, starrers.Repo);
-
-                    //ewww
-                    getStars.Wait();
-                    var stars = getStars.Result;
-                    Sender.Tell(stars.ToArray());
-                }
-                catch (Exception)
-                {
-                    //operation failed - let the parent know
-                    Sender.Tell(query.NextTry());
-                }
-            });
-        }
-    }
+			//query all star givers for a repository
+			Receive<RetryableQuery>(query => query.Query is QueryStarrers, query =>
+			{
+				// ReSharper disable once PossibleNullReferenceException (we know from the previous IS statement that this is not null)
+				var starGivers = (query.Query as QueryStarrers).Key;
+				var sender = Sender;
+				_gitHubClient.Activity.Starring.GetAllStargazers(starGivers.Owner, starGivers.Repo)
+					.ContinueWith<object>((Task<IReadOnlyList<User>> task) => task.IsFaulted || task.IsCanceled
+						? query.NextTry()
+						: task.Result.ToArray())
+					.PipeTo(sender);
+			});
+		}
+	}
 }

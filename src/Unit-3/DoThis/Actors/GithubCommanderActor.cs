@@ -1,9 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
+
 using Akka.Actor;
 using Akka.Routing;
-using Akka.Util.Internal;
 
 namespace GithubActors.Actors
 {
@@ -12,37 +11,8 @@ namespace GithubActors.Actors
 	/// </summary>
 	public class GithubCommanderActor : ReceiveActor, IWithUnboundedStash
 	{
-		public class CanAcceptJob
-		{
-			public CanAcceptJob(RepoKey repo)
-			{
-				Repo = repo;
-			}
-
-			public RepoKey Repo { get; }
-		}
-
-		public class AbleToAcceptJob
-		{
-			public AbleToAcceptJob(RepoKey repo)
-			{
-				Repo = repo;
-			}
-
-			public RepoKey Repo { get; }
-		}
-
-		public class UnableToAcceptJob
-		{
-			public UnableToAcceptJob(RepoKey repo)
-			{
-				Repo = repo;
-			}
-
-			public RepoKey Repo { get; }
-		}
-
 		private int _pendingJobReplies;
+		private RepoKey _repoKey;
 
 		private IActorRef _coordinator;
 		private IActorRef _canAcceptJobSender;
@@ -75,6 +45,7 @@ namespace GithubActors.Actors
 			Receive<CanAcceptJob>(message =>
 			{
 				_coordinator.Tell(message);
+				_repoKey = message.Repo;
 
 				BecomeAsking();
 			});
@@ -107,12 +78,19 @@ namespace GithubActors.Actors
 					BecomeReady();
 				}
 			});
+
+			Receive<ReceiveTimeout>(message =>
+			{
+				_canAcceptJobSender.Tell(new UnableToAcceptJob(_repoKey));
+				BecomeReady();
+			});
 		}
 
 		private void BecomeReady()
 		{
 			Become(Ready);
 			Stash.UnstashAll();
+			Context.SetReceiveTimeout(null);
 		}
 
 		private void BecomeAsking()
@@ -121,6 +99,38 @@ namespace GithubActors.Actors
 			_pendingJobReplies = _coordinator.Ask<Routees>(new GetRoutees()).Result.Members.Count();
 
 			Become(Asking);
+
+			Context.SetReceiveTimeout(TimeSpan.FromSeconds(3));
+		}
+
+		public class CanAcceptJob
+		{
+			public CanAcceptJob(RepoKey repo)
+			{
+				Repo = repo;
+			}
+
+			public RepoKey Repo { get; }
+		}
+
+		public class AbleToAcceptJob
+		{
+			public AbleToAcceptJob(RepoKey repo)
+			{
+				Repo = repo;
+			}
+
+			public RepoKey Repo { get; }
+		}
+
+		public class UnableToAcceptJob
+		{
+			public UnableToAcceptJob(RepoKey repo)
+			{
+				Repo = repo;
+			}
+
+			public RepoKey Repo { get; }
 		}
 	}
 }
