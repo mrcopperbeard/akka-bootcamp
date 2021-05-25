@@ -1,9 +1,11 @@
 namespace WinTail
 
 open System
+open System.IO
 open Akka.Actor
 open Akka.FSharp
 open Messages
+
 module Actors =
     type Command = 
     | Start
@@ -14,28 +16,31 @@ module Actors =
     // At the top of Actors.fs, before consoleReaderActor
     // Print instructions to the console
     let doPrintInstructions () =
-        Console.WriteLine "Write whatever you want into the console!"
-        Console.WriteLine "Some entries will pass validation, and some won't...\n\n"
-        Console.WriteLine "Type 'exit' to quit this application at any time.\n"
+        Console.WriteLine "Please provide the URI of a log file on disk.\n"
 
     let (|Message|Exit|) (str:string) =
         match str.ToLower() with
         | "exit" -> Exit
         | _ -> Message(str)
 
-    let validationActor (consoleWriter: IActorRef) (mailbox: Actor<_>) message =
-        let (|EmptyMessage|EvenMessage|OddMessage|) (str: string) =
-            match str.Length, str.Length % 2 with
-            | 0, _ -> EmptyMessage
-            | _, 0 -> EvenMessage
-            | _ -> OddMessage
+    let fileValidationActor (consoleWriter: IActorRef) (mailbox: Actor<_>) path =
+        let (|IsFileExists|_|) path = if File.Exists path then Some path else None
 
-        match message with
-        | EmptyMessage -> consoleWriter <! ErrorInput ("Input is empty", Null)
-        | EvenMessage -> consoleWriter <! ValidInput (sprintf "Input %s is correct!" message)
-        | OddMessage -> consoleWriter <! ErrorInput ($"Input {message} has odd number of symbols", Validation)
+        let (|EmptyMessage|Message|) (str: string) =
+            match str.Length with
+            | 0 -> EmptyMessage
+            | _ -> Message(str)
 
-        mailbox.Sender () <! Continue
+        match path with
+        | EmptyMessage ->
+            consoleWriter <! ErrorInput ("Input is blank", Null)
+            mailbox.Sender () <! Continue
+        | IsFileExists _ ->
+            consoleWriter <! ValidInput $"Starting process {path}"
+            select "/user/tail-coordinator" mailbox.Context <! StartTail(path, consoleWriter)
+        | _ ->
+            consoleWriter <! ErrorInput($"Path {path} is not existing path", Validation)
+            mailbox.Sender () <! Continue
 
     let consoleReaderActor (validationActor: IActorRef) (mailbox: Actor<_>) message =
         let getAndValidateInput () =
@@ -65,3 +70,42 @@ module Actors =
             | ValidInput(msg) -> printInColor ConsoleColor.Green msg
             | ErrorInput(err, _) -> printInColor ConsoleColor.Red err
         | other -> printInColor ConsoleColor.Yellow (other.ToString())
+
+    let tailActor path (reporterActor: IActorRef) (mailbox: Actor<_>) =
+        let fullPath = Path.GetFullPath (path)
+        let observer = new FileUtility.FileObserver(mailbox.Self, fullPath)
+        observer.Start()
+        let fileStream = new FileStream (fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
+        let streamReader = new StreamReader (fileStream)
+        let text = streamReader.ReadToEnd()
+        mailbox.Self <! InitialRead(path, text)
+        mailbox.Defer <| fun () ->
+            streamReader.Dispose()
+            fileStream.Dispose()
+            (observer :> IDisposable).Dispose()
+            reporterActor <! "Disposed"
+
+        let rec loop () = actor {
+            let! message = mailbox.Receive()
+            match (box message) :?> FileCommand with
+            | FileWrite _ ->
+                let text = streamReader.ReadToEnd()
+                if String.IsNullOrEmpty text then ()
+                else reporterActor <! text
+            | FileError (_, reason) -> reporterActor <! ErrorInput(reason, ReadError)
+            | InitialRead(_, initial)  -> reporterActor <! initial
+
+            return! loop()
+        }
+
+        loop()
+
+    let tailCoordinatorActor (mailbox: Actor<_>) message =
+        match message with
+        | StartTail(path, reporter) ->
+            tailActor path reporter
+            |> spawn mailbox.Context "tail"
+            |> ignore // Вызывает Initial Read при старте
+        | StopTail(_) ->
+            mailbox.Context.GetChildren()
+            |> Seq.iter mailbox.Context.Stop
