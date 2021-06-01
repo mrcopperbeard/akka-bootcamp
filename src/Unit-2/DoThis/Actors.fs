@@ -36,6 +36,24 @@ module Messages =
 /// Actors used to intialize chart data
 [<AutoOpen>]
 module Actors =
+    let buttonToggleActor coordinatorActor (button: Windows.Forms.Button) counterType (mailbox: Actor<_>) =
+        let flip isOn =
+            let toggled = not isOn
+            button.Text <- sprintf "%s (%s)" (counterType.ToString().ToUpperInvariant()) (if toggled then "ON" else "OFF")
+            toggled
+        
+        let rec loop isToggled = actor {
+            let! message = mailbox.Receive()
+            match message with
+            | Toggle when isToggled -> coordinatorActor <! Unwatch counterType
+            | Toggle when not isToggled -> coordinatorActor <! Watch counterType
+            | unhandled -> mailbox.Unhandled unhandled
+
+            return! isToggled |> flip |> loop
+        }
+
+        loop false
+
     let performanceCounterActor
         (seriesName: string)
         (performanceCounterGenerator: unit -> PerformanceCounter)
@@ -83,7 +101,7 @@ module Actors =
 
         let counterSeries = Map.ofList [
             Cpu, fun _ -> new Series(string Cpu, ChartType = SeriesChartType.SplineArea, Color = Color.DarkGreen)
-            Memory, fun _ -> new Series(string Memory, SeriesChartType.FastLine, Color = Color.MediumBlue)
+            Memory, fun _ -> new Series(string Memory, ChartType = SeriesChartType.FastLine, Color = Color.MediumBlue)
             Disc, fun _ -> new Series(string Disc, ChartType = SeriesChartType.SplineArea, Color = Color.DarkRed)
         ]
 
@@ -114,24 +132,60 @@ module Actors =
         loop Map.empty<CounterType, IActorRef>
 
     let chartingActor (chart: Chart) (mailbox: Actor<_>) =
-        let rec charting (mapping: Map<string, Series>) = actor {
+        let maxPoints = 250
+
+        let setChartBoundaries (mapping: Map<string, Series>) (numberOfPoints: int) =
+            let allPoints =
+                    mapping
+                    |> Map.toList
+                    |> Seq.collect (fun (_, series) -> series.Points)
+                    |> (fun points -> HashSet<DataPoint>(points))
+                    
+            if allPoints |> Seq.length > 2 then
+                let yValues = allPoints |> Seq.collect (fun p -> p.YValues) |> Seq.toList
+                chart.ChartAreas.[0].AxisX.Maximum <- float numberOfPoints
+                chart.ChartAreas.[0].AxisX.Minimum <- (float numberOfPoints - float maxPoints)
+                chart.ChartAreas.[0].AxisY.Maximum <- if List.length yValues > 0 then Math.Ceiling(List.max yValues) else 1.
+                chart.ChartAreas.[0].AxisY.Minimum <- if List.length yValues > 0 then Math.Floor(List.min yValues) else 0.
+
+        let rec charting (mapping: Map<string, Series>) (numberOfPoints: int) = actor {
             let! message = mailbox.Receive()
+
+            let isNewSeries (series: string) =
+                not <| String.IsNullOrEmpty series &&
+                not <| mapping.ContainsKey series 
+
             match message with
             | InitializeChart series ->
                 chart.Series.Clear ()
                 series |> Map.iter (fun k v ->
                     v.Name <- k
                     chart.Series.Add(v))
-                return! charting series
-            | AddSeries series when
-                not <| String.IsNullOrEmpty series.Name &&
-                not <| mapping.ContainsKey series.Name ->
+                return! charting series numberOfPoints
+            | AddSeries series when isNewSeries series.Name ->
                     let newMapping = mapping.Add (series.Name, series)
                     chart.Series.Add series
-                    return! charting newMapping
+                    setChartBoundaries newMapping numberOfPoints
+
+                    return! charting newMapping numberOfPoints
+            | RemoveSeries series when isNewSeries series ->
+                chart.Series.Remove(mapping.[series]) |> ignore
+                let newMapping = mapping.Remove series
+                setChartBoundaries newMapping numberOfPoints
+
+                return! charting newMapping numberOfPoints
+            | Metric(seriesName, counterValue) when isNewSeries seriesName ->
+                let newNumPofPoints = numberOfPoints + 1
+                let series = mapping.[seriesName]
+                series.Points.AddXY (numberOfPoints, counterValue) |> ignore
+                while (series.Points.Count > maxPoints) do series.Points.RemoveAt 0
+                setChartBoundaries mapping newNumPofPoints
+
+                return! charting mapping newNumPofPoints
+            | m -> mailbox.Unhandled m
         }
 
-        charting Map.empty<string, Series>
+        charting Map.empty<string, Series> 0
 
 
 
