@@ -75,18 +75,19 @@ module Actors =
         let rec loop subscriptions = actor {
             let! message = mailbox.Receive()
             match box message :?> CounterMessage with
-            | Subscribe(subscriber) ->
+            | Subscribe subscriber ->
                 return! subscriptions
                 |> List.filter (fun s -> s <> subscriber)
                 |> fun tail -> subscriber :: tail
                 |> loop
-            | Unsubscribe(subscriber) ->
+            | Unsubscribe subscriber ->
                 return! subscriptions
                 |> List.filter (fun s -> s <> subscriber)
                 |> loop
             | GatherMetric ->
                 let msg = Metric(seriesName, counter.NextValue() |> float)
                 subscriptions |> List.iter (fun s -> s <! msg)
+
                 return! loop subscriptions
         }
 
@@ -168,13 +169,13 @@ module Actors =
                     setChartBoundaries newMapping numberOfPoints
 
                     return! charting newMapping numberOfPoints
-            | RemoveSeries series when isNewSeries series ->
+            | RemoveSeries series ->
                 chart.Series.Remove(mapping.[series]) |> ignore
                 let newMapping = mapping.Remove series
                 setChartBoundaries newMapping numberOfPoints
 
                 return! charting newMapping numberOfPoints
-            | Metric(seriesName, counterValue) when isNewSeries seriesName ->
+            | Metric(seriesName, counterValue) ->
                 let newNumPofPoints = numberOfPoints + 1
                 let series = mapping.[seriesName]
                 series.Points.AddXY (numberOfPoints, counterValue) |> ignore

@@ -6,8 +6,6 @@ open System.Drawing
 open System.Windows.Forms
 open System.Windows.Forms.DataVisualization.Charting
 
-open Akka.Util.Internal
-
 [<AutoOpen>]
 module Form =
     let inline (^) f x y = f x y
